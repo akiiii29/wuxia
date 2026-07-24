@@ -1,10 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ASSETS } from './assets'
 import { audio } from './engine/audio'
-import { ELEMENTS, ENEMY_NAMES, META_KEY, ROOTS, SPEEDS, TALENTS, TECHNIQUES, type Element, type Technique } from './game/config'
+import { ELEMENTS, META_KEY, ROOTS, SPEEDS, TALENTS, TECHNIQUES, type Element, type Technique } from './game/config'
 import type { Enemy, MetaState, RunState, SkillSlot } from './game/types'
 
 const DEFAULT_META: MetaState = { souls: 0, totalRuns: 0, bestFloor: 0, legacyAtk: 0, legacyHp: 0, legacySavvy: 0 }
+const ENEMY_VARIANTS = [
+  { name: 'Hắc Phong Lang', sprite: ASSETS.quaiHacPhongLang },
+  { name: 'U Minh Xà', sprite: ASSETS.quaiUMinhXa },
+  { name: 'Thiết Giáp Khôi', sprite: ASSETS.quaiThietGiapKhoi },
+  { name: 'Xích Diễm Điểu', sprite: ASSETS.quaiXichDiemDieu },
+]
+const SPIRIT_VARIANTS = [
+  { name: 'Hỏa Hồ', sprite: ASSETS.hoaHo },
+  { name: 'Bạch Hổ Linh Thú', sprite: ASSETS.linhThuBachHo },
+  { name: 'Huyền Vũ Linh Thú', sprite: ASSETS.linhThuHuyenVu },
+  { name: 'Thanh Loan Linh Thú', sprite: ASSETS.linhThuThanhLuan },
+]
 let nextId = 1
 
 function pick<T>(list: T[]): T { return list[Math.floor(Math.random() * list.length)] }
@@ -13,8 +25,10 @@ function enemyFor(floor: number): Enemy {
   const boss = floor % 5 === 0
   const level = Math.max(1, floor + Math.floor(floor / 3))
   const hp = Math.round((boss ? 580 : 230) * Math.pow(1.16, floor - 1))
+  const variant = boss ? pick([...ENEMY_VARIANTS, { name: 'Lôi Long', sprite: ASSETS.loiLong }]) : ENEMY_VARIANTS[(floor - 1) % ENEMY_VARIANTS.length]
   return {
-    name: boss ? (floor % 10 === 0 ? 'Thái Cổ Lôi Long' : 'Lôi Long Hộ Tháp') : ENEMY_NAMES[(floor - 1) % 4],
+    name: boss ? `${variant.name} Yêu Vương` : variant.name,
+    sprite: variant.sprite,
     level, boss, hp, maxHp: hp, qi: 0, maxQi: 0,
     atk: Math.round((boss ? 36 : 20) * Math.pow(1.1, floor - 1)),
     def: Math.round((boss ? 18 : 8) * Math.pow(1.08, floor - 1)),
@@ -28,6 +42,7 @@ function loadMeta(): MetaState {
 function initialRun(meta: MetaState): RunState {
   const root = pick(ROOTS)
   const talent = pick(TALENTS)
+  const spirit = pick(SPIRIT_VARIANTS)
   const first = TECHNIQUES.find(t => t.element === root.element) || TECHNIQUES[0]
   return {
     phase: 'title', floor: 1, level: 1, exp: 0, expNext: 55, stones: 0, tick: 0, tickProgress: 0,
@@ -36,7 +51,7 @@ function initialRun(meta: MetaState): RunState {
     enemy: enemyFor(1), skills: [{ ...first, cd: 0, level: 1 }],
     savvy: 12 + meta.legacySavvy * 3 + (talent.name === 'Đạo Pháp Tự Nhiên' ? 18 : 0), crit: .14, critDmg: 1.65,
     lifesteal: talent.name === 'Bách Độc Bất Xâm' ? .05 : .02, swordIntent: 0, wetPrimed: false,
-    treasures: [], spirit: 'Hỏa Hồ', combatTexts: [], logs: [{ id: nextId++, text: `Linh căn thức tỉnh: ${root.name}`, element: root.element }],
+    treasures: [], spirit: spirit.name, combatTexts: [], logs: [{ id: nextId++, text: `Linh căn thức tỉnh: ${root.name}`, element: root.element }],
     draftChoices: [], eventSeen: 0, muted: false, flash: 'none', shake: false,
   }
 }
@@ -168,6 +183,7 @@ function TechniqueCard({ technique, onPick, owned }: { technique: Technique; onP
 export default function App() {
   const [meta, setMeta] = useState<MetaState>(loadMeta)
   const [run, setRun] = useState<RunState>(() => initialRun(loadMeta()))
+  const [isEnteringBattle, setIsEnteringBattle] = useState(false)
   const runRef = useRef(run)
   runRef.current = run
 
@@ -200,7 +216,14 @@ export default function App() {
     })
   }, [run.phase])
 
-  const startRun = useCallback(() => setRun(prev => ({ ...prev, phase: 'battle', enemy: enemyFor(1) })), [])
+  const startRun = useCallback(() => {
+    if (isEnteringBattle) return
+    setIsEnteringBattle(true)
+    window.setTimeout(() => {
+      setRun(prev => ({ ...prev, phase: 'battle', enemy: enemyFor(1) }))
+      setIsEnteringBattle(false)
+    }, 620)
+  }, [isEnteringBattle])
   const newRun = useCallback(() => setRun(initialRun(meta)), [meta])
   const cycleSpeed = () => setRun(prev => ({ ...prev, speed: SPEEDS[(SPEEDS.indexOf(prev.speed as typeof SPEEDS[number]) + 1) % SPEEDS.length] }))
   const toggleMute = () => setRun(prev => { audio.setMuted(!prev.muted); return { ...prev, muted: !prev.muted } })
@@ -241,8 +264,27 @@ export default function App() {
   const qiPct = run.hero.qi / run.hero.maxQi * 100
   const expPct = run.exp / run.expNext * 100
   const rootElement = ELEMENTS[run.root.element]
+  const activeSpirit = SPIRIT_VARIANTS.find(spirit => spirit.name === run.spirit) || SPIRIT_VARIANTS[0]
   const bossLabel = run.enemy.boss ? 'BOSS' : `TẦNG ${run.floor}`
   const soulGain = Math.max(1, Math.floor(run.floor * 1.4 + run.eventSeen * 3 + run.savvy / 12))
+
+  if (run.phase === 'title') return <main className="rebirth-shell" style={{ '--root-color': rootElement.color } as React.CSSProperties}>
+    <div className={`rebirth-overlay ${isEnteringBattle ? 'is-dissolving' : ''}`}>
+      <div className="rebirth-stars"/><div className="rebirth-rune rune-one">{rootElement.icon}</div><div className="rebirth-rune rune-two">☯</div>
+      <section className="rebirth-content">
+        <p className="eyebrow">CỬU THIÊN · LUÂN HỒI KHAI MỆNH</p>
+        <div className="rebirth-emblem" style={{ color: rootElement.color }}>{rootElement.icon}</div>
+        <h1>KIẾP MỚI<br/><span>ĐÃ KHAI MỞ</span></h1>
+        <p className="rebirth-copy">Linh quang hội tụ. Một hành trình leo Tháp Cửu Thiên mới đang chờ ngươi.</p>
+        <div className="awakening-grid">
+          <article><small>LINH CĂN THỨC TỈNH</small><b style={{ color: rootElement.color }}>{rootElement.icon} {run.root.name}</b><p>{run.root.bonus}</p><em>{run.root.detail}</em></article>
+          <article><small>THIÊN PHÚ BẨM SINH</small><b>{run.talent.icon} {run.talent.name}</b><p>{run.talent.detail}</p><em>Linh thú đồng hành: {activeSpirit.name}</em></article>
+          <article className="legacy-card"><small>DI SẢN LUÂN HỒI ĐANG HIỆU LỰC</small><div><span>⚔ +{meta.legacyAtk * 7} ATK</span><span>♥ +{meta.legacyHp * 55} HP</span><span>☯ +{meta.legacySavvy * 3} Ngộ Tính</span></div><em>{meta.souls} ◉ Điểm Luân Hồi còn lại</em></article>
+        </div>
+        <button className="primary-btn rebirth-start" onClick={startRun} disabled={isEnteringBattle}><span>{isEnteringBattle ? 'DUNG HỢP THIÊN MỆNH...' : 'BẮT ĐẦU TU LUYỆN'}</span><small>{isEnteringBattle ? 'Cửa tháp đang mở' : 'Tiến vào tầng một Tháp Cửu Thiên'}</small></button>
+      </section>
+    </div>
+  </main>
 
   return <main className={`game-shell ${run.shake ? 'shake' : ''}`}>
     <div className="sky" style={{ backgroundImage: `linear-gradient(180deg, rgba(4,12,28,.04), rgba(2,8,18,.5)), url(${ASSETS.celestialTower})` }} />
@@ -267,15 +309,15 @@ export default function App() {
         <div className="bar hp enemy"><i style={{ width: `${enemyPct}%` }}/><em>{Math.ceil(Math.max(0, run.enemy.hp))} / {run.enemy.maxHp}</em></div>
         <div className="status-row">{run.enemy.burn > 0 && <span>🔥 {run.enemy.burn}</span>}{run.enemy.poison > 0 && <span>☠ {run.enemy.poison}</span>}{run.enemy.frozen > 0 && <span>❄ Đóng Băng</span>}</div>
       </div>
-      <div className="portrait dragon-portrait"><img src={ASSETS.loiLong}/><span>{run.enemy.level}</span></div>
+      <div className={`portrait enemy-portrait ${run.enemy.boss ? 'boss-portrait' : ''}`}><img src={run.enemy.sprite}/><span>{run.enemy.level}</span></div>
     </section>
 
     <div className="tick-track"><div className="tick-fill" style={{ width: `${run.tickProgress * 100}%` }}/><span>TICK {run.tick + 1}</span></div>
 
     <section className="battle-stage">
-      <div className={`hero-unit ${run.flash === 'hero' ? 'hit' : ''}`}><div className="aura aura-hero"/><img className="hero-sprite" src={ASSETS.lamPhong}/><img className="fox-sprite" src={ASSETS.hoaHo}/><div className="unit-label">Lâm Phong <span>✦ {run.swordIntent}/6</span></div></div>
+      <div className={`hero-unit ${run.flash === 'hero' ? 'hit' : ''}`}><div className="aura aura-hero"/><img className="hero-sprite" src={ASSETS.lamPhong}/><img className="fox-sprite" src={activeSpirit.sprite}/><div className="unit-label">Lâm Phong <span>✦ {run.swordIntent}/6</span></div></div>
       <div className="versus-rune">☯</div>
-      <div className={`enemy-unit ${run.flash === 'enemy' ? 'hit' : ''}`}><div className="aura aura-enemy"/><img className="dragon-sprite" src={ASSETS.loiLong}/><div className="unit-label enemy-label">{run.enemy.name}</div></div>
+      <div className={`enemy-unit ${run.enemy.boss ? 'boss-unit' : ''} ${run.flash === 'enemy' ? 'hit' : ''}`}><div className="aura aura-enemy"/><img className="enemy-sprite" src={run.enemy.sprite}/><div className="unit-label enemy-label">{run.enemy.name}</div></div>
       {run.combatTexts.map(t => <span key={t.id} className={`floating ${t.side} ${t.tone}`}>{t.text}</span>)}
     </section>
 
@@ -292,14 +334,6 @@ export default function App() {
     </section>
 
     <aside className="battle-log">{run.logs.slice(-4).map(entry => <p key={entry.id} style={{ color: entry.element ? ELEMENTS[entry.element].color : undefined }}><span>›</span> {entry.text}</p>)}</aside>
-
-    {run.phase === 'title' && <div className="overlay title-screen">
-      <div className="title-emblem">☯</div><p className="eyebrow">TU TIÊN · ROGUELITE · LUÂN HỒI</p>
-      <h1>CỬU THIÊN<br/><span>LUÂN HỒI</span></h1><p className="title-sub">Nhất niệm thành tiên · Vạn kiếp bất diệt</p>
-      <div className="destiny-card"><div><span className="destiny-icon" style={{ color: rootElement.color }}>{rootElement.icon}</span><small>LINH CĂN</small><b>{run.root.name}</b><em>{run.root.bonus}</em></div><i/><div><span className="destiny-icon">{run.talent.icon}</span><small>THIÊN PHÚ</small><b>{run.talent.name}</b><em>{run.talent.detail}</em></div></div>
-      <button className="primary-btn" onClick={startRun}><span>KHỞI ĐẦU KIẾP MỚI</span><small>Chạm để nhập tháp</small></button>
-      <div className="meta-glance"><span>Kiếp đã trải: {meta.totalRuns}</span><span>Tầng cao nhất: {meta.bestFloor}</span><span>Điểm Luân Hồi: ◉ {meta.souls}</span></div>
-    </div>}
 
     {run.phase === 'draft' && <div className="overlay modal-layer"><div className="modal draft-modal">
       <div className="modal-title"><span>☯</span><div><small>CƠ DUYÊN LĨNH NGỘ</small><h2>CHỌN MỘT CÔNG PHÁP</h2></div><span>☯</span></div>

@@ -14,6 +14,7 @@ export type Fighter = {
 
 export type Enemy = Fighter & {
   name: string
+  sprite: string
   level: number
   boss: boolean
   burn: number
