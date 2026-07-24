@@ -35,10 +35,11 @@ export const TECHNIQUES: Technique[] = [
 ]
 
 export const ROOTS = [
-  { name: 'Hỏa Linh Căn', element: 'hoa' as Element, bonus: '+18% Thiêu Đốt', detail: 'Hỏa pháp dễ lĩnh ngộ hơn.' },
-  { name: 'Thủy Mộc Song Sinh', element: 'thuy' as Element, bonus: '+15 Ngộ Tính', detail: 'Tương sinh Thủy → Mộc được cường hóa.' },
-  { name: 'Canh Kim Linh Căn', element: 'kim' as Element, bonus: '+12% Bạo Kích', detail: 'Kiếm khí sắc bén, xuyên giáp cao.' },
-  { name: 'Hậu Thổ Linh Căn', element: 'tho' as Element, bonus: '+20% Hộ Thể', detail: 'Khiên và phản thương mạnh hơn.' },
+  { name: 'Hỏa Linh Căn', element: 'hoa' as Element, bonus: 'Thiêu Đốt +30%, đánh thường 20% gây Bỏng', detail: 'Hỏa pháp nung cháy mọi sinh cơ.' },
+  { name: 'Thủy Linh Căn', element: 'thuy' as Element, bonus: '+10% Đóng Băng, +3 Qi mỗi Tick', detail: 'Thủy pháp lưu chuyển, tạo Làm Ướt trong 2 Tick.' },
+  { name: 'Thanh Mộc Linh Căn', element: 'moc' as Element, bonus: 'Hồi máu +25%, Độc thêm 2% HP mục tiêu', detail: 'Sinh cơ bất tận, độc tố ăn sâu vào huyết mạch.' },
+  { name: 'Canh Kim Linh Căn', element: 'kim' as Element, bonus: '+15% Crit DMG, Kim pháp -1 CD', detail: 'Kiếm khí sắc bén, xuyên giáp cao.' },
+  { name: 'Hậu Thổ Linh Căn', element: 'tho' as Element, bonus: 'Đầu trận tạo Khiên 10% HP, +15% DEF', detail: 'Sơn hà hộ thể, vững như bàn thạch.' },
 ]
 
 export const TALENTS = [

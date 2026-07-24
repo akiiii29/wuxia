@@ -1,6 +1,6 @@
 import type { Element, Technique } from './config'
 
-export type Phase = 'title' | 'battle' | 'draft' | 'event' | 'dead'
+export type Phase = 'title' | 'battle' | 'draft' | 'event' | 'shop' | 'dead'
 
 export type Fighter = {
   hp: number
@@ -64,6 +64,7 @@ export type RunState = {
   lifesteal: number
   lastElement?: Element
   wetPrimed: boolean
+  wetTicks: number
   swordIntent: number
   treasures: string[]
   spirit: string

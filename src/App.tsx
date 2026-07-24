@@ -47,10 +47,10 @@ function initialRun(meta: MetaState): RunState {
   return {
     phase: 'title', floor: 1, level: 1, exp: 0, expNext: 55, stones: 0, tick: 0, tickProgress: 0,
     speed: 1, autoSkip: false, root, talent,
-    hero: { hp: 620 + meta.legacyHp * 55, maxHp: 620 + meta.legacyHp * 55, qi: 40, maxQi: 100, atk: 68 + meta.legacyAtk * 7, def: 22, shield: 0 },
+    hero: { hp: 620 + meta.legacyHp * 55, maxHp: 620 + meta.legacyHp * 55, qi: talent.name === 'Đạo Pháp Tự Nhiên' ? 50 : 40, maxQi: 100, atk: 68 + meta.legacyAtk * 7, def: Math.round(22 * (root.element === 'tho' ? 1.15 : 1)), shield: 0 },
     enemy: enemyFor(1), skills: [{ ...first, cd: 0, level: 1 }],
-    savvy: 12 + meta.legacySavvy * 3 + (talent.name === 'Đạo Pháp Tự Nhiên' ? 18 : 0), crit: .14, critDmg: 1.65,
-    lifesteal: talent.name === 'Bách Độc Bất Xâm' ? .05 : .02, swordIntent: 0, wetPrimed: false,
+    savvy: 12 + meta.legacySavvy * 3 + (talent.name === 'Đạo Pháp Tự Nhiên' ? 18 : 0), crit: .14, critDmg: 1.65 * (root.element === 'kim' ? 1.15 : 1),
+    lifesteal: talent.name === 'Bách Độc Bất Xâm' ? .05 : .02, swordIntent: 0, wetPrimed: false, wetTicks: 0,
     treasures: [], spirit: spirit.name, combatTexts: [], logs: [{ id: nextId++, text: `Linh căn thức tỉnh: ${root.name}`, element: root.element }],
     draftChoices: [], eventSeen: 0, muted: false, flash: 'none', shake: false,
   }
@@ -60,6 +60,12 @@ function float(text: string, side: 'hero' | 'enemy' | 'center', tone: 'damage' |
   return { id: nextId++, text, side, tone }
 }
 function log(text: string, element?: Element) { return { id: nextId++, text, element } }
+
+function beginBattle(s: RunState, enemy = enemyFor(s.floor)): RunState {
+  const hero = { ...s.hero }
+  if (s.root.element === 'tho') hero.shield = Math.max(hero.shield, Math.round(hero.maxHp * .1))
+  return { ...s, phase: 'battle', hero, enemy, tickProgress: 0, wetPrimed: false, wetTicks: 0 }
+}
 
 function resolveTick(prev: RunState): RunState {
   if (prev.phase !== 'battle') return prev
@@ -74,15 +80,20 @@ function resolveTick(prev: RunState): RunState {
     logs: [...prev.logs].slice(-7),
     flash: 'none', shake: false,
   }
-  s.hero.qi = Math.min(s.hero.maxQi, s.hero.qi + 8 + Math.floor(s.savvy / 15))
+  const wasWet = prev.wetPrimed
+  s.wetTicks = Math.max(0, prev.wetTicks - 1)
+  s.wetPrimed = s.wetTicks > 0
+  const qiRegen = 8 + Math.floor(s.savvy / 15) + (s.root.element === 'thuy' ? 3 : 0)
+  s.hero.qi = Math.min(s.hero.maxQi, s.hero.qi + qiRegen)
   if (s.hero.shield > 0) s.hero.shield = Math.max(0, s.hero.shield - 4)
 
   if (s.enemy.burn > 0) {
-    const dot = Math.round(s.hero.atk * .14 * s.enemy.burn)
+    const dot = Math.round(s.hero.atk * .14 * s.enemy.burn * (s.root.element === 'hoa' ? 1.3 : 1))
     s.enemy.hp -= dot; s.enemy.burn--; s.combatTexts.push(float(`-${dot} 🔥`, 'enemy', 'status'))
+    if (s.treasures.includes('phoenix-vase')) s.hero.qi = Math.min(s.hero.maxQi, s.hero.qi + 5)
   }
   if (s.enemy.poison > 0) {
-    const dot = Math.round(s.hero.atk * .1 * s.enemy.poison)
+    const dot = Math.round((s.hero.atk * .1 + (s.root.element === 'moc' ? s.enemy.maxHp * .02 : 0)) * s.enemy.poison)
     s.enemy.hp -= dot; s.enemy.poison--; s.combatTexts.push(float(`-${dot} ☠`, 'enemy', 'status'))
   }
 
@@ -91,21 +102,24 @@ function resolveTick(prev: RunState): RunState {
     const idx = s.skills.findIndex(sk => sk.id === ready.id)
     let power = ready.power * (1 + (ready.level - 1) * .18)
     let synergy = ''
-    if (s.lastElement === 'thuy' && ready.element === 'moc') { power *= 1.5; synergy = 'THỦY SINH MỘC!' }
+    if (wasWet && ready.element === 'moc') { power *= 1.5; s.wetPrimed = false; s.wetTicks = 0; synergy = 'THỦY SINH MỘC!' }
+    const steamDamage = wasWet && ready.element === 'hoa' ? Math.round(s.hero.atk * (.9 + ready.level * .1)) : 0
+    if (steamDamage) { s.enemy.hp -= steamDamage; s.wetPrimed = false; s.wetTicks = 0; synergy = 'NHIỆT BỐC HƠI!'; s.combatTexts.push(float(`CHUẨN -${steamDamage}`, 'enemy', 'crit')) }
     if (s.lastElement === 'moc' && ready.element === 'hoa') { power *= 1.4; synergy = 'MỘC SINH HỎA!' }
     if (ready.element === 'hoa' && s.enemy.frozen > 0) { power += .8; s.enemy.frozen = 0; synergy = 'NHIỆT BỐC HƠI!' }
     let critChance = s.crit + (ready.element === 'kim' ? .22 : 0)
     const crit = Math.random() < critChance
     let damage = Math.round(s.hero.atk * power * (crit ? s.critDmg : 1) * (100 / (100 + Math.max(0, s.enemy.def - (ready.element === 'kim' ? 12 : 0)))))
-    s.enemy.hp -= damage; s.hero.qi -= ready.qi; s.skills[idx].cd = Math.max(1, ready.cooldown - Math.floor(s.savvy / 50))
+    s.enemy.hp -= damage; s.hero.qi -= ready.qi; s.skills[idx].cd = Math.max(1, ready.cooldown - Math.floor(s.savvy / 50) - (s.root.element === 'kim' && ready.element === 'kim' ? 1 : 0))
     s.combatTexts.push(float(`-${damage}${crit ? ' BẠO!' : ''}`, 'enemy', crit ? 'crit' : 'damage'))
     s.logs.push(log(`${ready.name} gây ${damage} sát thương.`, ready.element))
     if (synergy) { s.combatTexts.push(float(synergy, 'center', 'reward')); s.logs.push(log(synergy, ready.element)) }
     if (ready.status === 'burn') s.enemy.burn = Math.min(7, s.enemy.burn + 3)
-    if (ready.status === 'poison') { s.enemy.poison = Math.min(7, s.enemy.poison + (s.lastElement === 'thuy' ? 5 : 3)); s.hero.hp = Math.min(s.hero.maxHp, s.hero.hp + Math.round(s.hero.maxHp * .05)) }
-    if (ready.status === 'freeze' && Math.random() < .48) s.enemy.frozen = 1
+    if (ready.element === 'thuy') { s.wetPrimed = true; s.wetTicks = 2; s.combatTexts.push(float('LÀM ƯỚT · 2', 'enemy', 'status')) }
+    if (ready.status === 'poison') { s.enemy.poison = Math.min(7, s.enemy.poison + (wasWet ? 5 : 3)); s.hero.hp = Math.min(s.hero.maxHp, s.hero.hp + Math.round(s.hero.maxHp * .05 * (s.root.element === 'moc' ? 1.25 : 1))) }
+    if (ready.status === 'freeze' && Math.random() < (.48 + (s.root.element === 'thuy' ? .1 : 0))) s.enemy.frozen = 1
     if (ready.status === 'shield') s.hero.shield += Math.round(s.hero.maxHp * .14)
-    const heal = Math.round(damage * s.lifesteal)
+    const heal = Math.round(damage * s.lifesteal * (s.root.element === 'moc' ? 1.25 : 1))
     if (heal > 0) { s.hero.hp = Math.min(s.hero.maxHp, s.hero.hp + heal); s.combatTexts.push(float(`+${heal} HP`, 'hero', 'heal')) }
     s.lastElement = ready.element; s.flash = 'enemy'; s.shake = crit || Boolean(synergy)
     audio.playSfx('spell', { volume: .5, rate: .95 + Math.random() * .1 })
@@ -115,6 +129,17 @@ function resolveTick(prev: RunState): RunState {
     s.enemy.hp -= damage; s.combatTexts.push(float(`-${damage}${crit ? '!' : ''}`, 'enemy', crit ? 'crit' : 'damage'))
     s.logs.push(log(`Lâm Phong xuất kiếm gây ${damage}.`, 'kim')); s.flash = 'enemy'
     s.swordIntent++
+    if (s.root.element === 'hoa' && Math.random() < .2) { s.enemy.burn = Math.min(7, s.enemy.burn + 1); s.combatTexts.push(float('BỎNG', 'enemy', 'status')) }
+    if (s.swordIntent >= 6 && s.talent.name !== 'Kiếm Tâm Thông Minh') {
+      s.swordIntent = 0
+      if (s.talent.name === 'Bách Độc Bất Xâm') {
+        s.enemy.poison = Math.min(7, s.enemy.poison + 2); s.combatTexts.push(float('ĐỘC Ý +2', 'enemy', 'status'))
+      } else if (s.talent.name === 'Đạo Pháp Tự Nhiên') {
+        s.enemy.frozen = 1; s.combatTexts.push(float('CHƯỞNG Ý · PHONG ẤN', 'enemy', 'status'))
+      } else {
+        s.hero.hp = Math.min(s.hero.maxHp, s.hero.hp + Math.round(s.hero.maxHp * .04)); s.hero.qi = Math.min(s.hero.maxQi, s.hero.qi + 10); s.combatTexts.push(float('KHÍ VẬN HỘ THỂ', 'hero', 'heal'))
+      }
+    }
     if (s.swordIntent >= 6) {
       const swordDamage = Math.round(s.hero.atk * 1.6)
       s.enemy.hp -= swordDamage; s.swordIntent = 0
@@ -154,7 +179,10 @@ function winFloor(s: RunState): RunState {
   s.floor++
   s.combatTexts.push(float(`THẮNG! +${gainExp} EXP`, 'center', 'reward'))
   s.logs.push(log(`Vượt tầng ${oldFloor}, nhận Linh Thạch.`, 'kim'))
-  if (s.exp >= s.expNext) {
+  if (s.floor % 10 === 5) {
+    s.phase = 'shop'; s.eventSeen++
+    audio.playSfx('reward', { volume: .5 })
+  } else if (s.exp >= s.expNext) {
     s.level++; s.exp -= s.expNext; s.expNext = Math.round(s.expNext * 1.28)
     s.hero.maxHp += 42; s.hero.hp = Math.min(s.hero.maxHp, s.hero.hp + 110); s.hero.atk += 9
     s.phase = 'draft'; s.draftChoices = sample(TECHNIQUES, s.savvy >= 45 ? 4 : 3)
@@ -163,7 +191,7 @@ function winFloor(s: RunState): RunState {
     s.phase = 'event'; s.eventSeen++
     audio.playSfx('reward', { volume: .5 })
   } else {
-    s.enemy = enemyFor(s.floor)
+    return beginBattle(s)
   }
   return s
 }
@@ -220,7 +248,7 @@ export default function App() {
     if (isEnteringBattle) return
     setIsEnteringBattle(true)
     window.setTimeout(() => {
-      setRun(prev => ({ ...prev, phase: 'battle', enemy: enemyFor(1) }))
+      setRun(prev => beginBattle(prev, enemyFor(1)))
       setIsEnteringBattle(false)
     }, 620)
   }, [isEnteringBattle])
@@ -234,7 +262,7 @@ export default function App() {
       const skills: SkillSlot[] = existing
         ? prev.skills.map(s => s.id === tech.id ? { ...s, level: s.level + 1 } : s)
         : [...prev.skills, { ...tech, cd: 0, level: 1 }].slice(-4)
-      return { ...prev, skills, phase: 'battle', enemy: prev.enemy.hp <= 0 ? enemyFor(prev.floor) : prev.enemy, logs: [...prev.logs, log(existing ? `${tech.name} đột phá Nhập Môn!` : `Lĩnh ngộ ${tech.name}!`, tech.element)] }
+      return beginBattle({ ...prev, skills, logs: [...prev.logs, log(existing ? `${tech.name} đột phá Nhập Môn!` : `Lĩnh ngộ ${tech.name}!`, tech.element)] }, prev.enemy.hp <= 0 ? enemyFor(prev.floor) : prev.enemy)
     })
     audio.playSfx('reward', { volume: .7 })
   }
@@ -242,13 +270,33 @@ export default function App() {
   const chooseEvent = (kind: 'chest' | 'heal' | 'master') => {
     setRun(prev => {
       const next = { ...prev, hero: { ...prev.hero }, treasures: [...prev.treasures], logs: [...prev.logs] }
-      if (kind === 'chest') { next.treasures.push('Bình Chu Tước'); next.hero.atk += 14; next.logs.push(log('Nhận Bình Chu Tước: ATK +14.', 'hoa')) }
+      if (kind === 'chest') { next.treasures.push('phoenix-vase'); next.hero.atk += 14; next.logs.push(log('Nhận Bình Chu Tước: ATK +14, địch Bỏng hồi 5 Qi.', 'hoa')) }
       if (kind === 'heal') { next.hero.hp = next.hero.maxHp; next.hero.maxHp += 55; next.logs.push(log('Tẩy Tủy thành công: HP tối đa +55.', 'moc')) }
       if (kind === 'master') { next.savvy += 12; next.hero.qi = next.hero.maxQi; next.logs.push(log('Cao nhân điểm hóa: Ngộ Tính +12.', 'thuy')) }
-      next.phase = 'battle'; next.enemy = enemyFor(next.floor); return next
+      return beginBattle(next, enemyFor(next.floor))
     })
     audio.playSfx('reward', { volume: .72 })
   }
+
+  const rerollDraft = () => setRun(prev => {
+    const cost = 22
+    if (prev.stones < cost) return prev
+    return { ...prev, stones: prev.stones - cost, draftChoices: sample(TECHNIQUES, prev.savvy >= 45 ? 4 : 3), logs: [...prev.logs, log('Thương Hội xoay chuyển cơ duyên Draft.', 'kim')] }
+  })
+
+  const buyRelic = (id: 'phoenix-vase' | 'void-jade') => setRun(prev => {
+    const cost = id === 'phoenix-vase' ? 55 : 70
+    if (prev.stones < cost || prev.treasures.includes(id) || prev.treasures.length >= 2) return prev
+    return { ...prev, stones: prev.stones - cost, treasures: [...prev.treasures, id], logs: [...prev.logs, log(id === 'phoenix-vase' ? 'Mua Bình Chu Tước: địch Bỏng hồi 5 Qi.' : 'Mua Hư Không Ngọc: Qi tối đa +25.', 'hoa')], hero: id === 'void-jade' ? { ...prev.hero, maxQi: prev.hero.maxQi + 25, qi: prev.hero.qi + 25 } : prev.hero }
+  })
+
+  const upgradeSkillAtShop = (skillId: string) => setRun(prev => {
+    const cost = 34
+    if (prev.stones < cost) return prev
+    return { ...prev, stones: prev.stones - cost, skills: prev.skills.map(skill => skill.id === skillId ? { ...skill, level: skill.level + 1 } : skill), logs: [...prev.logs, log('Tẩy Tủy thành công: Công Pháp +1.', 'thuy')] }
+  })
+
+  const leaveShop = () => setRun(prev => beginBattle(prev, enemyFor(prev.floor)))
 
   const buyLegacy = (type: 'atk' | 'hp' | 'savvy') => {
     const costs = { atk: 8 + meta.legacyAtk * 6, hp: 8 + meta.legacyHp * 6, savvy: 10 + meta.legacySavvy * 8 }
@@ -307,7 +355,7 @@ export default function App() {
     <section className="combat-hud enemy-hud">
       <div className="fighter-bars"><div className="fighter-name"><small>Lv. {run.enemy.level} · {run.enemy.boss ? 'YÊU VƯƠNG' : 'HỘ THÁP'}</small><b>{run.enemy.name}</b></div>
         <div className="bar hp enemy"><i style={{ width: `${enemyPct}%` }}/><em>{Math.ceil(Math.max(0, run.enemy.hp))} / {run.enemy.maxHp}</em></div>
-        <div className="status-row">{run.enemy.burn > 0 && <span>🔥 {run.enemy.burn}</span>}{run.enemy.poison > 0 && <span>☠ {run.enemy.poison}</span>}{run.enemy.frozen > 0 && <span>❄ Đóng Băng</span>}</div>
+        <div className="status-row">{run.enemy.burn > 0 && <span>🔥 {run.enemy.burn}</span>}{run.enemy.poison > 0 && <span>☠ {run.enemy.poison}</span>}{run.enemy.frozen > 0 && <span>❄ Đóng Băng</span>}{run.wetPrimed && <span>💧 Ướt {run.wetTicks}</span>}</div>
       </div>
       <div className={`portrait enemy-portrait ${run.enemy.boss ? 'boss-portrait' : ''}`}><img src={run.enemy.sprite}/><span>{run.enemy.level}</span></div>
     </section>
@@ -330,6 +378,12 @@ export default function App() {
         </div>)}
         {Array.from({ length: Math.max(0, 4 - run.skills.length) }).map((_, i) => <div className="skill-slot empty" key={i}><div className="skill-icon">＋</div><b>Ô Công Pháp</b><small>Chưa lĩnh ngộ</small></div>)}
       </div>
+      <div className="relic-row">{['phoenix-vase', 'void-jade'].map((relicId, index) => {
+        const owned = run.treasures.includes(relicId)
+        const label = relicId === 'phoenix-vase' ? 'Bình Chu Tước' : 'Hư Không Ngọc'
+        const icon = relicId === 'phoenix-vase' ? '🏺' : '🔮'
+        return <div key={relicId} className={`relic-slot ${owned ? 'owned' : ''}`}><span>{owned ? icon : '＋'}</span><small>{owned ? label : `Ô Pháp Bảo ${index + 1}`}</small></div>
+      })}</div>
       <div className="battle-controls"><button className="speed-btn" onClick={cycleSpeed}>TỐC ĐỘ <b>×{run.speed}</b></button><button className={run.autoSkip ? 'active' : ''} onClick={() => setRun(p => ({ ...p, autoSkip: !p.autoSkip }))}>AUTO-SKIP</button><div className="exp"><span>Lv. {run.level}</span><div className="bar expbar"><i style={{ width: `${expPct}%` }}/></div><small>{run.exp}/{run.expNext} EXP</small></div></div>
     </section>
 
@@ -338,6 +392,7 @@ export default function App() {
     {run.phase === 'draft' && <div className="overlay modal-layer"><div className="modal draft-modal">
       <div className="modal-title"><span>☯</span><div><small>CƠ DUYÊN LĨNH NGỘ</small><h2>CHỌN MỘT CÔNG PHÁP</h2></div><span>☯</span></div>
       <p>Đột phá cảnh giới · Lâm Phong đạt <b>Lv. {run.level}</b></p>
+      <button className="reroll-btn" onClick={rerollDraft} disabled={run.stones < 22}>Thương Hội Reroll · 22 ◈</button>
       <div className="draft-grid">{run.draftChoices.map(t => <TechniqueCard key={t.id} technique={t} owned={run.skills.some(s => s.id === t.id)} onPick={() => chooseTechnique(t)}/>)}</div>
     </div></div>}
 
@@ -349,6 +404,17 @@ export default function App() {
         <button onClick={() => chooseEvent('heal')}><span>♨</span><b>Đài Tẩy Tủy</b><small>Hồi đầy Sinh Mệnh<br/>HP tối đa +55</small></button>
         <button onClick={() => chooseEvent('master')}><span>仙</span><b>Kỳ Ngộ Cao Nhân</b><small>Ngộ Tính +12<br/>Hồi đầy Nội Lực</small></button>
       </div>
+    </div></div>}
+
+    {run.phase === 'shop' && <div className="overlay modal-layer"><div className="modal shop-modal">
+      <div className="modal-title"><span>◈</span><div><small>THƯƠNG HỘI VẠN BẢO · TẦNG {run.floor}</small><h2>PHÁP BẢO & TẨY TỦY</h2></div><span>◈</span></div>
+      <p>Linh Thạch hiện có: <b>{run.stones} ◈</b> · Pháp Bảo không tốn Qi, không chiếm ô Công Pháp.</p>
+      <div className="shop-grid">
+        <button onClick={() => buyRelic('phoenix-vase')} disabled={run.stones < 55 || run.treasures.includes('phoenix-vase') || run.treasures.length >= 2}><span>🏺</span><b>Bình Chu Tước</b><small>Mỗi Tick địch bị Bỏng: hồi 5 Qi</small><em>55 ◈</em></button>
+        <button onClick={() => buyRelic('void-jade')} disabled={run.stones < 70 || run.treasures.includes('void-jade') || run.treasures.length >= 2}><span>🔮</span><b>Hư Không Ngọc</b><small>Qi tối đa +25, hồi ngay 25 Qi</small><em>70 ◈</em></button>
+      </div>
+      <div className="shop-skills">{run.skills.map(skill => <button key={skill.id} onClick={() => upgradeSkillAtShop(skill.id)} disabled={run.stones < 34}><span>{skill.icon}</span><b>{skill.name} · Lv.{skill.level}</b><small>Tẩy Tủy +1 · 34 ◈</small></button>)}</div>
+      <button className="primary-btn" onClick={leaveShop}><span>RỜI THƯƠNG HỘI</span><small>Tiến vào trận chiến kế tiếp</small></button>
     </div></div>}
 
     {run.phase === 'dead' && <div className="overlay modal-layer death-layer"><div className="modal death-modal">
